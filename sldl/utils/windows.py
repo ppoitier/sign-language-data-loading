@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import pandas as pd
 
@@ -141,18 +143,16 @@ def convert_samples_to_windows(
     )
 
 
-# def filter_empty_windows(instances: list[dict], max_empty_windows: int, annotations: tuple[str]):
-#     empty_window_indices = [
-#         index
-#         for index, instance in enumerate(instances)
-#         if instance["segments"].shape[0] < 1
-#     ]
-#     kept_empty_windows = random.sample(empty_window_indices, max_empty_windows)
-#     removed_windows_indices = set(empty_window_indices).difference(
-#         set(kept_empty_windows)
-#     )
-#     return [
-#         instance
-#         for i, instance in enumerate(instances)
-#         if i not in removed_windows_indices
-#     ]
+def filter_empty_windows(samples: list[dict], max_empty_windows: int):
+    empty_window_indices = [
+        index
+        for index, sample in enumerate(samples)
+        if all(annots.shape[0] < 1 for annots in sample["annotations"].values())
+    ]
+    if len(empty_window_indices) <= max_empty_windows:
+        return samples
+    kept_empty_windows = random.sample(empty_window_indices, max_empty_windows)
+    removed_windows_indices = set(empty_window_indices) - set(kept_empty_windows)
+    return [
+        sample for i, sample in enumerate(samples) if i not in removed_windows_indices
+    ]

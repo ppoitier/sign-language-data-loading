@@ -2,7 +2,7 @@ import pandas as pd
 from tqdm import tqdm
 import webdataset as wds
 
-from sldl.utils.windows import convert_samples_to_windows
+from sldl.utils.windows import convert_samples_to_windows, filter_empty_windows
 from sldl.targets.target import TargetEncoder
 
 
@@ -48,6 +48,7 @@ class SignLanguageDataset:
         video_transform=None,
         annotation_transform=None,
         targets: dict[str, TargetEncoder] | None = None,
+        precompute_targets: bool = False,
         use_windows: bool = False,
         window_size: int = 3000,
         window_stride: int = 2800,
@@ -57,7 +58,6 @@ class SignLanguageDataset:
         self.pose_transforms = pose_transform
         self.video_transform = video_transform
         self.annotation_transform = annotation_transform
-        self.targets = targets
 
         web_dataset = wds.DataPipeline(
             wds.SimpleShardList(shards_url),
@@ -81,6 +81,16 @@ class SignLanguageDataset:
         if use_windows:
             self._build_windows(window_size, window_stride, max_empty_windows)
 
+        self.targets = targets
+        self.precompute_targets = precompute_targets
+        if targets and precompute_targets:
+            print("Precomputing targets...")
+            for sample in self.samples:
+                sample["targets"] = {}
+                for target_name, encoder in targets.items():
+                    sample["targets"][target_name] = encoder.encode(sample)
+            print("Target precomputed.")
+
     def _build_windows(
         self, window_size: int, window_stride: int, max_empty_windows: int | None = None
     ):
@@ -90,15 +100,12 @@ class SignLanguageDataset:
         )
         n_windows = len(self.samples)
         print(f"Converted {n_instances} samples to {n_windows} windowed samples.")
-        # TODO: max empty windows
-        # if max_empty_windows is None:
-        #     return
-        # self.samples = filter_windows_without_annotations(
-        #     self.samples, max_empty_windows
-        # )
-        # print(
-        #     f"Removed {n_windows - len(self.samples)} empty samples. There are {len(self.samples)} final samples."
-        # )
+        if max_empty_windows is None:
+            return
+        self.samples = filter_empty_windows(self.samples, max_empty_windows)
+        print(
+            f"Removed {n_windows - len(self.samples)} empty samples. There are {len(self.samples)} final samples."
+        )
 
     # def get_label_occurrences(self):
     #     return _compute_label_occurrences(self.samples)
@@ -121,25 +128,9 @@ class SignLanguageDataset:
         if self.use_windows:
             sample["window_id"] = f"{sample['id']}_{sample['start']}_{sample['end']}"
 
-        if self.targets:
+        if self.targets and not self.precompute_targets:
             sample["targets"] = {}
             for target_name, encoder in self.targets.items():
                 sample["targets"][target_name] = encoder.encode(sample)
 
         return sample
-
-
-if __name__ == "__main__":
-    dataset = SignLanguageDataset(
-        shards_url="file:E:/datasets/sign-language/lsfb-cont/shards/shard_000000.tar",
-        use_windows=True,
-        window_size=1500,
-        window_stride=1000,
-        show_loading_progress=True,
-    )
-    print("#samples = ", len(dataset))
-    sample = dataset[1]
-    print(type(sample))
-    print("sample keys = ", sample.keys())
-    print("sample #frames = ", sample["n_frames"])
-    print("sample pose shapes = ", {b: p.shape for b, p in sample["poses"].items()})
