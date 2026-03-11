@@ -3,6 +3,7 @@ from tqdm import tqdm
 import webdataset as wds
 
 from sldl.utils.windows import convert_samples_to_windows, filter_empty_windows
+from sldl.utils.videos import load_video_in_dir
 from sldl.targets.target import TargetEncoder
 
 
@@ -49,6 +50,8 @@ class SignLanguageDataset:
         annotation_transform=None,
         targets: dict[str, TargetEncoder] | None = None,
         precompute_targets: bool = False,
+        load_videos: bool = False,
+        video_dir: str | None = None,
         use_windows: bool = False,
         window_size: int = 3000,
         window_stride: int = 2800,
@@ -58,6 +61,10 @@ class SignLanguageDataset:
         self.pose_transforms = pose_transform
         self.video_transform = video_transform
         self.annotation_transform = annotation_transform
+        self.load_videos = load_videos
+        self.video_dir = video_dir
+        if self.load_videos and not self.video_dir:
+            raise ValueError("You need to specify a video directory.")
 
         web_dataset = wds.DataPipeline(
             wds.SimpleShardList(shards_url),
@@ -122,6 +129,16 @@ class SignLanguageDataset:
 
     def __getitem__(self, index):
         sample = {**self.samples[index]}
+
+        if self.load_videos:
+            sample["video"] = load_video_in_dir(
+                sample["id"],
+                self.video_dir,
+                start_frame=sample.get("start"),
+                end_frame=sample.get("end"),
+            )
+            if self.video_transform:
+                sample["video"] = self.video_transform(sample["video"])
 
         if self.pose_transforms is not None:
             sample["poses"] = self.pose_transforms(sample["poses"])
