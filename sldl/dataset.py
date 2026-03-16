@@ -1,3 +1,7 @@
+from pathlib import Path
+import json
+import warnings
+
 import pandas as pd
 from tqdm import tqdm
 import webdataset as wds
@@ -51,7 +55,8 @@ class SignLanguageDataset:
         targets: dict[str, TargetEncoder] | None = None,
         precompute_targets: bool = False,
         load_videos: bool = False,
-        video_dir: str | None = None,
+        video_path: str | Path | None = None,
+        video_index_path: str | Path |  None = None,
         use_windows: bool = False,
         window_size: int = 3000,
         window_stride: int = 2800,
@@ -62,9 +67,24 @@ class SignLanguageDataset:
         self.video_transform = video_transform
         self.annotation_transform = annotation_transform
         self.load_videos = load_videos
-        self.video_dir = video_dir
-        if self.load_videos and not self.video_dir:
-            raise ValueError("You need to specify a video directory.")
+        self.video_path = Path(video_path) if video_path else None
+        self.video_index_path = Path(video_index_path) if video_index_path else None
+
+        self.is_tar_video = False
+        self.tar_index = {}
+
+        if self.load_videos:
+            if not self.video_path:
+                raise ValueError("You need to specify a video_path (a directory or a .tar file).")
+            if self.video_path.suffix == ".tar":
+                self.is_tar_video = True
+                index_path = self.video_index_path or self.video_path.with_name(f"{self.video_path.name}.index.json")
+                if not index_path.exists():
+                    raise FileNotFoundError(f"Tar index not found at: {index_path}")
+                with index_path.open("r") as f:
+                    self.tar_index = json.load(f)
+            elif self.video_index_path is not None:
+                warnings.warn("`video_index_path` was provided, but `video_path` is not a .tar file. The index will be ignored.")
 
         web_dataset = wds.DataPipeline(
             wds.SimpleShardList(shards_url),
