@@ -7,11 +7,11 @@ from tqdm import tqdm
 import webdataset as wds
 
 from sldl.utils.windows import convert_samples_to_windows, filter_empty_windows
-from sldl.utils.videos import load_video_in_dir
+from sldl.utils.videos import load_video_in_dir, load_video_in_tar
 from sldl.targets.target import TargetEncoder
 
 
-def _get_webdataset_mapping_fn(body_parts, annotations):
+def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
     def mapping_fn(sample: dict) -> dict:
         sample = {
             "id": sample["__key__"],
@@ -42,11 +42,96 @@ def _get_webdataset_mapping_fn(body_parts, annotations):
     return mapping_fn
 
 
+def _get_isolated_webdataset_mapping_fn(body_parts):
+    def mapping_fn(sample: dict) -> dict:
+        sample = {
+            "id": sample["__key__"],
+            "poses": {
+                body_part: sample[f"pose.{body_part}.npy"] for body_part in body_parts
+            },
+            "label_id": int(sample["label.idx"]),
+            "label": sample["label.txt"].strip(),
+        }
+        sample["n_frames"] = next(iter(sample["poses"].values())).shape[0]
+        return sample
+
+    return mapping_fn
+
+
 class SignLanguageDataset:
+    """A dataset for sign language pose data stored as WebDataset shards.
+
+    Supports two modes:
+
+    - **Continuous** (default): each sample contains multi-frame pose sequences
+      with temporal annotations (e.g. gloss boundaries). Samples can optionally
+      be split into overlapping windows.
+    - **Isolated** (``isolated=True``): each sample is a single sign clip with
+      a ``label.idx`` / ``label.txt`` pair instead of annotations. Windowing is
+      not supported in this mode.
+
+    In both modes, videos can be loaded on-the-fly from a directory or a
+    ``.tar`` archive, and pose / video / annotation transforms are applied at
+    ``__getitem__`` time.
+
+    Args:
+        shards_url: WebDataset shard pattern
+            (e.g. ``"data/shards-{000..003}.tar"``).
+        isolated: If ``True``, use isolated-sign mode with per-sample labels
+            instead of temporal annotations.
+        body_parts: Pose body parts to load from the shards. Each body part
+            should have a corresponding ``pose.<body_part>.npy`` file in the
+            shard.
+        annotations: Annotation identifiers to load (continuous mode only).
+            Each should have a corresponding ``annotations.<id>.json`` file.
+        pose_transform: A callable applied to the pose dict at
+            ``__getitem__`` time.
+        video_transform: A callable applied to loaded video tensors at
+            ``__getitem__`` time.
+        annotation_transform: A callable applied to annotations (reserved for
+            future use).
+        targets: A mapping of target names to :class:`TargetEncoder` instances.
+            Each encoder is called on the sample to produce a target value.
+        precompute_targets: If ``True``, encode all targets once at load time
+            rather than on every ``__getitem__`` call.
+        load_videos: If ``True``, load video frames at ``__getitem__`` time.
+            Requires ``video_path`` to be set.
+        video_path: Path to a directory of video files or a ``.tar`` archive.
+        video_index_path: Path to a JSON index for the video ``.tar`` archive.
+            Defaults to ``<video_path>.index.json`` when ``video_path`` is a
+            ``.tar`` file.
+        use_windows: If ``True``, split continuous samples into overlapping
+            temporal windows. Ignored (with a warning) in isolated mode.
+        window_size: Window length in milliseconds.
+        window_stride: Stride between consecutive windows in milliseconds.
+        max_empty_windows: If set, discard windows that contain no annotations
+            beyond this count.
+        show_loading_progress: If ``True``, display a ``tqdm`` progress bar
+            while loading shards.
+
+    Example::
+
+        # Continuous dataset with windowing
+        ds = SignLanguageDataset(
+            "data/shards-{000..003}.tar",
+            use_windows=True,
+            window_size=3000,
+            window_stride=2800,
+        )
+
+        # Isolated dataset
+        ds = SignLanguageDataset(
+            "data/isolated-{000..001}.tar",
+            isolated=True,
+        )
+        sample = ds[0]
+        print(sample["label"])  # e.g. "HELLO"
+    """
 
     def __init__(
         self,
         shards_url: str,
+        isolated: bool = False,
         body_parts=("upper_pose", "left_hand", "right_hand"),
         annotations=("both_hands",),
         pose_transform=None,
@@ -56,13 +141,14 @@ class SignLanguageDataset:
         precompute_targets: bool = False,
         load_videos: bool = False,
         video_path: str | Path | None = None,
-        video_index_path: str | Path |  None = None,
+        video_index_path: str | Path | None = None,
         use_windows: bool = False,
         window_size: int = 3000,
         window_stride: int = 2800,
         max_empty_windows: int | None = None,
         show_loading_progress: bool = False,
     ):
+        self.isolated = isolated
         self.pose_transforms = pose_transform
         self.video_transform = video_transform
         self.annotation_transform = annotation_transform
@@ -75,23 +161,39 @@ class SignLanguageDataset:
 
         if self.load_videos:
             if not self.video_path:
-                raise ValueError("You need to specify a video_path (a directory or a .tar file).")
+                raise ValueError(
+                    "You need to specify a video_path (a directory or a .tar file)."
+                )
             if self.video_path.suffix == ".tar":
                 self.is_tar_video = True
-                index_path = self.video_index_path or self.video_path.with_name(f"{self.video_path.name}.index.json")
+                index_path = self.video_index_path or self.video_path.with_name(
+                    f"{self.video_path.name}.index.json"
+                )
                 if not index_path.exists():
                     raise FileNotFoundError(f"Tar index not found at: {index_path}")
                 with index_path.open("r") as f:
                     self.tar_index = json.load(f)
             elif self.video_index_path is not None:
-                warnings.warn("`video_index_path` was provided, but `video_path` is not a .tar file. The index will be ignored.")
+                warnings.warn(
+                    "`video_index_path` was provided, but `video_path` is not a .tar file. The index will be ignored."
+                )
+
+        if isolated:
+            if use_windows:
+                warnings.warn(
+                    "Windowing is not supported for isolated datasets. Ignoring `use_windows`."
+                )
+                use_windows = False
+            mapping_fn = _get_isolated_webdataset_mapping_fn(body_parts)
+        else:
+            mapping_fn = _get_continuous_webdataset_mapping_fn(body_parts, annotations)
 
         web_dataset = wds.DataPipeline(
             wds.SimpleShardList(shards_url),
             wds.split_by_worker,
             wds.tarfile_to_samples(),
             wds.decode(),
-            wds.map(_get_webdataset_mapping_fn(body_parts, annotations)),
+            wds.map(mapping_fn),
         )
         self.samples: list[dict] = []
         progress_bar = tqdm(
@@ -151,12 +253,21 @@ class SignLanguageDataset:
         sample = {**self.samples[index]}
 
         if self.load_videos:
-            sample["video"] = load_video_in_dir(
-                sample["id"],
-                self.video_dir,
-                start_frame=sample.get("start"),
-                end_frame=sample.get("end"),
-            )
+            if self.is_tar_video:
+                sample["video"] = load_video_in_tar(
+                    sample["id"],
+                    self.video_path,
+                    self.tar_index,
+                    start_frame=sample.get("start"),
+                    end_frame=sample.get("end"),
+                )
+            else:
+                sample["video"] = load_video_in_dir(
+                    sample["id"],
+                    self.video_path,
+                    start_frame=sample.get("start"),
+                    end_frame=sample.get("end"),
+                )
             if self.video_transform:
                 sample["video"] = self.video_transform(sample["video"])
 

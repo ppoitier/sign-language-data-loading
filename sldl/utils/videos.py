@@ -11,7 +11,7 @@ except ImportError:
 
 def load_video_in_dir(
         sample_id: str,
-        video_dir: str,
+        video_dir: str | Path,
         start_frame: int | None = None,
         end_frame: int | None = None,
 ):
