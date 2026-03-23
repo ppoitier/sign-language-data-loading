@@ -130,7 +130,7 @@ class SignLanguageDataset:
 
     def __init__(
         self,
-        shards_url: str,
+        shards_url: str | list[str],
         isolated: bool = False,
         body_parts=("upper_pose", "left_hand", "right_hand"),
         annotations=("both_hands",),
