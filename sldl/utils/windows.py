@@ -24,13 +24,47 @@ def compute_window_indices(
     return np.column_stack((start_indices[valid_windows], end_indices[valid_windows]))
 
 
+# def _get_annotations_in_window(
+#     annotations: pd.DataFrame, window_start: int, window_end: int
+# ) -> pd.DataFrame:
+#     """
+#     Filters, clips, and shifts annotations to fit within a specific window.
+#     Assumes `annotations` has 'start_frame' and 'end_frame' columns.
+#     """
+#     mask = (annotations["start_frame"] < window_end) & (
+#         annotations["end_frame"] >= window_start
+#     )
+#
+#     df_window = annotations.loc[mask].copy()
+#     if df_window.empty:
+#         return df_window
+#
+#     df_window["start_frame"] = df_window["start_frame"].clip(
+#         lower=window_start, upper=window_end
+#     )
+#     df_window["end_frame"] = df_window["end_frame"].clip(
+#         lower=window_start, upper=window_end
+#     )
+#
+#     # Shift the frames so they are relative to the start of the window
+#     df_window["start_frame"] -= window_start
+#     df_window["end_frame"] -= window_start
+#
+#     # TODO: update start_ms and end_ms. We need the framerate here...
+#     return df_window
+
+
 def _get_annotations_in_window(
     annotations: pd.DataFrame, window_start: int, window_end: int
 ) -> pd.DataFrame:
     """
     Filters, clips, and shifts annotations to fit within a specific window.
-    Assumes `annotations` has 'start_frame' and 'end_frame' columns.
     """
+    if not {"start_frame", "end_frame"}.issubset(annotations.columns):
+        raise ValueError(
+            "Annotations must have 'start_frame' and 'end_frame' columns for windowing."
+        )
+
     mask = (annotations["start_frame"] < window_end) & (
         annotations["end_frame"] >= window_start
     )
@@ -39,6 +73,16 @@ def _get_annotations_in_window(
     if df_window.empty:
         return df_window
 
+    # Infer framerate from original values before clipping, if ms columns exist
+    has_ms = {"start_ms", "end_ms"}.issubset(df_window.columns)
+    fps = None
+    if has_ms:
+        dur_frames = df_window["end_frame"] - df_window["start_frame"]
+        dur_ms = df_window["end_ms"] - df_window["start_ms"]
+        valid = dur_ms > 0
+        if valid.any():
+            fps = (dur_frames[valid] / dur_ms[valid] * 1000).median()
+
     df_window["start_frame"] = df_window["start_frame"].clip(
         lower=window_start, upper=window_end
     )
@@ -46,11 +90,15 @@ def _get_annotations_in_window(
         lower=window_start, upper=window_end
     )
 
-    # Shift the frames so they are relative to the start of the window
     df_window["start_frame"] -= window_start
     df_window["end_frame"] -= window_start
 
-    # TODO: update start_ms and end_ms. We need the framerate here...
+    if has_ms and fps is not None:
+        df_window["start_ms"] = (
+            (df_window["start_frame"] / fps * 1000).round().astype(int)
+        )
+        df_window["end_ms"] = (df_window["end_frame"] / fps * 1000).round().astype(int)
+
     return df_window
 
 

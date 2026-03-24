@@ -12,6 +12,7 @@ from sldl.targets.target import TargetEncoder
 
 
 def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
+    # annotations: dict[str, list[str] | None] or None
     def mapping_fn(sample: dict) -> dict:
         sample = {
             "id": sample["__key__"],
@@ -23,19 +24,9 @@ def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
             sample["annotations"] = {
                 annot_id: pd.DataFrame(
                     sample[f"annotations.{annot_id}.json"],
-                    columns=[
-                        "start_ms",
-                        "end_ms",
-                        "gloss",
-                        "start_frame",
-                        "end_frame",
-                        "lemma",
-                        "sign_type",
-                        "specifier",
-                        "variation",
-                    ],
+                    columns=columns,
                 )
-                for annot_id in annotations
+                for annot_id, columns in annotations.items()
             }
         sample["n_frames"] = next(iter(sample["poses"].values())).shape[0]
         return sample
@@ -134,7 +125,9 @@ class SignLanguageDataset:
         shards_url: str | list[str],
         isolated: bool = False,
         body_parts=("upper_pose", "left_hand", "right_hand"),
-        annotations: tuple[str, ...] | None = ("both_hands",),
+        annotations: tuple[str, ...] | dict[str, list[str] | None] | None = (
+            "both_hands",
+        ),
         pose_transform=None,
         video_transform=None,
         annotation_transform=None,
@@ -158,6 +151,8 @@ class SignLanguageDataset:
         self.video_index_path = Path(video_index_path) if video_index_path else None
 
         self.body_parts = body_parts
+        if isinstance(annotations, (list, tuple)):
+            annotations = {annot_id: None for annot_id in annotations}
         self.annotation_ids = annotations
 
         self.is_tar_video = False
