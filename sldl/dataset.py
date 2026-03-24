@@ -18,7 +18,9 @@ def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
             "poses": {
                 body_part: sample[f"pose.{body_part}.npy"] for body_part in body_parts
             },
-            "annotations": {
+        }
+        if annotations:
+            sample["annotations"] = {
                 annot_id: pd.DataFrame(
                     sample[f"annotations.{annot_id}.json"],
                     columns=[
@@ -34,8 +36,7 @@ def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
                     ],
                 )
                 for annot_id in annotations
-            },
-        }
+            }
         sample["n_frames"] = next(iter(sample["poses"].values())).shape[0]
         return sample
 
@@ -133,7 +134,7 @@ class SignLanguageDataset:
         shards_url: str | list[str],
         isolated: bool = False,
         body_parts=("upper_pose", "left_hand", "right_hand"),
-        annotations=("both_hands",),
+        annotations: tuple[str, ...] | None = ("both_hands",),
         pose_transform=None,
         video_transform=None,
         annotation_transform=None,
@@ -155,6 +156,9 @@ class SignLanguageDataset:
         self.load_videos = load_videos
         self.video_path = Path(video_path) if video_path else None
         self.video_index_path = Path(video_index_path) if video_index_path else None
+
+        self.body_parts = body_parts
+        self.annotation_ids = annotations
 
         self.is_tar_video = False
         self.tar_index = {}
@@ -230,6 +234,11 @@ class SignLanguageDataset:
         n_windows = len(self.samples)
         print(f"Converted {n_instances} samples to {n_windows} windowed samples.")
         if max_empty_windows is None:
+            return
+        if not self.annotation_ids:
+            warnings.warn(
+                "max_empty_windows is set, but no annotations were found. This parameter is therefore ignored."
+            )
             return
         self.samples = filter_empty_windows(self.samples, max_empty_windows)
         print(

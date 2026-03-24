@@ -4,26 +4,6 @@ import numpy as np
 import pandas as pd
 
 
-def _compute_window_indices(
-    n_frames: int, window_size: int, window_stride: int
-) -> np.ndarray:
-    """
-    Compute the start and end indices for each window, including a possibly shorter last window.
-
-    Args:
-        n_frames: Total length of the sequence
-        window_size: Size of each window
-        window_stride: Stride between windows
-
-    Returns:
-        np.ndarray: Array of shape (n_windows, 2) containing start and end indices for each window
-    """
-    start_indices = np.arange(0, n_frames, window_stride)
-    end_indices = np.minimum(start_indices + window_size, n_frames)
-    valid_windows = start_indices != end_indices
-    return np.column_stack((start_indices[valid_windows], end_indices[valid_windows]))
-
-
 def compute_window_indices(
     sequence_length: int, window_size: int, stride: int
 ) -> np.ndarray:
@@ -111,21 +91,21 @@ def _get_window(
 def _get_all_windows_from_sample(
     sample: dict, window_size: int, window_stride: int
 ) -> list[dict]:
-    window_indices = _compute_window_indices(
+    window_indices = compute_window_indices(
         sample["n_frames"], window_size, window_stride
     )
+    custom_fns = {}
+    if "annotations" in sample:
+        custom_fns["annotations"] = lambda x, start, end: {
+            k: _get_annotations_in_window(v, start, end) for k, v in x.items()
+        }
     return [
         _get_window(
             sample,
             start,
             end,
             add_window_metadata=True,
-            # TODO handle targets
-            custom_window_functions={
-                "annotations": lambda x, start, end: {
-                    k: _get_annotations_in_window(v, start, end) for k, v in x.items()
-                },
-            },
+            custom_window_functions=custom_fns,
         )
         for start, end in window_indices
     ]
