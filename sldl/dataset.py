@@ -13,20 +13,22 @@ from sldl.targets.target import TargetEncoder
 
 def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
     # annotations: dict[str, list[str] | None] or None
-    def mapping_fn(sample: dict) -> dict:
+    def mapping_fn(raw_sample: dict) -> dict:
         sample = {
-            "id": sample["__key__"],
+            "id": raw_sample["__key__"],
             "poses": {
-                body_part: sample[f"pose.{body_part}.npy"] for body_part in body_parts
+                body_part: raw_sample[f"pose.{body_part}.npy"]
+                for body_part in body_parts
             },
         }
         if annotations:
             sample["annotations"] = {
                 annot_id: pd.DataFrame(
-                    sample[f"annotations.{annot_id}.json"],
+                    raw_sample[f"annotations.{annot_id}.json"],
                     columns=columns,
                 )
                 for annot_id, columns in annotations.items()
+                if f"annotations.{annot_id}.json" in raw_sample
             }
         sample["n_frames"] = next(iter(sample["poses"].values())).shape[0]
         return sample
@@ -198,7 +200,7 @@ class SignLanguageDataset:
         progress_bar = tqdm(
             web_dataset,
             disable=not show_loading_progress,
-            unit="samples",
+            unit=" samples",
             desc="Loading samples",
         )
         for sample in progress_bar:
@@ -222,6 +224,7 @@ class SignLanguageDataset:
     def _build_windows(
         self, window_size: int, window_stride: int, max_empty_windows: int | None = None
     ):
+        print(f"Building windows of size {window_size} with stride {window_stride}...")
         n_instances = len(self.samples)
         self.samples = convert_samples_to_windows(
             self.samples, window_size, window_stride
