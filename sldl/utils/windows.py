@@ -24,36 +24,6 @@ def compute_window_indices(
     return np.column_stack((start_indices[valid_windows], end_indices[valid_windows]))
 
 
-# def _get_annotations_in_window(
-#     annotations: pd.DataFrame, window_start: int, window_end: int
-# ) -> pd.DataFrame:
-#     """
-#     Filters, clips, and shifts annotations to fit within a specific window.
-#     Assumes `annotations` has 'start_frame' and 'end_frame' columns.
-#     """
-#     mask = (annotations["start_frame"] < window_end) & (
-#         annotations["end_frame"] >= window_start
-#     )
-#
-#     df_window = annotations.loc[mask].copy()
-#     if df_window.empty:
-#         return df_window
-#
-#     df_window["start_frame"] = df_window["start_frame"].clip(
-#         lower=window_start, upper=window_end
-#     )
-#     df_window["end_frame"] = df_window["end_frame"].clip(
-#         lower=window_start, upper=window_end
-#     )
-#
-#     # Shift the frames so they are relative to the start of the window
-#     df_window["start_frame"] -= window_start
-#     df_window["end_frame"] -= window_start
-#
-#     # TODO: update start_ms and end_ms. We need the framerate here...
-#     return df_window
-
-
 def _get_annotations_in_window(
     annotations: pd.DataFrame, window_start: int, window_end: int
 ) -> pd.DataFrame:
