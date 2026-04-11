@@ -54,4 +54,4 @@ class TemporalBoundaryOffsetsTarget(TargetEncoder):
     def collate(self, batch_targets: list[Any]) -> Any:
         return pad_sequence(
             batch_targets, batch_first=True, padding_value=self.pad_value
-        )
+        ).permute(0, 2, 1)
