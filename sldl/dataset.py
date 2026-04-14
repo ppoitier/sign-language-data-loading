@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 import json
 import warnings
@@ -8,6 +9,7 @@ import webdataset as wds
 
 from sldl.utils.windows import convert_samples_to_windows, filter_empty_windows
 from sldl.utils.videos import load_video_in_dir, load_video_in_tar
+from sldl.utils.weighting import compute_class_weights
 from sldl.targets.target import TargetEncoder
 
 
@@ -197,6 +199,7 @@ class SignLanguageDataset:
             wds.map(mapping_fn),
         )
         self.samples: list[dict] = []
+        print(f"Loading dataset [{shards_url}]...")
         progress_bar = tqdm(
             web_dataset,
             disable=not show_loading_progress,
@@ -243,15 +246,66 @@ class SignLanguageDataset:
             f"Removed {n_windows - len(self.samples)} empty samples. There are {len(self.samples)} final samples."
         )
 
-    # def get_label_occurrences(self):
-    #     return _compute_label_occurrences(self.samples)
-    #
-    # def get_label_frequencies(self):
-    #     occurrences = self.get_label_occurrences()
-    #     return occurrences / occurrences.sum()
-    #
-    # def get_label_weights(self):
-    #     return 1 / self.get_label_frequencies()
+    def get_label_occurrences(self, target_name: str) -> Counter:
+        """Count label occurrences for a precomputed target.
+
+        Works for two kinds of targets:
+            - Scalar targets (e.g., isolated-sign class index)
+            - Sequence targets (e.g., per-frame labels) — flattened before counting
+
+        Requires the target to have been precomputed (``precompute_targets=True``).
+        """
+        if not self.targets or target_name not in self.targets:
+            raise ValueError(f"Unknown target: {target_name!r}")
+        if not self.precompute_targets:
+            raise RuntimeError(
+                "get_label_occurrences requires precompute_targets=True."
+            )
+
+        first = self.samples[0]["targets"][target_name]
+        is_sequence = hasattr(first, "__len__") and not isinstance(first, (str, bytes))
+
+        counter = Counter()
+        if is_sequence:
+            for sample in self.samples:
+                counter.update(int(x) for x in sample["targets"][target_name])
+        else:
+            counter.update(
+                int(sample["targets"][target_name]) for sample in self.samples
+            )
+        return counter
+
+    def get_label_frequencies(self, target_name: str) -> dict:
+        occurrences = self.get_label_occurrences(target_name)
+        total = sum(occurrences.values())
+        return {label: count / total for label, count in occurrences.items()}
+
+    def get_label_weights(
+        self,
+        target_name: str,
+        strategy: str = "effective_number",
+        alpha: float = 0.5,
+        beta: float = 0.999,
+        log_offset: float = 1.02,
+        median_clip: float | None = None,
+        normalize: bool = True,
+    ) -> dict:
+        """Compute per-class weights suitable for long-tail distributions.
+
+        See: func:`sldl.utils.weighting.compute_class_weights` for available
+        strategies. The default "effective_number" (Cui et al., 2019) is
+        generally a good choice for sign language datasets.
+        """
+        occurrences = self.get_label_occurrences(target_name)
+        return compute_class_weights(
+            occurrences,
+            strategy=strategy,
+            alpha=alpha,
+            beta=beta,
+            log_offset=log_offset,
+            median_clip=median_clip,
+            normalize=normalize,
+        )
 
     def __len__(self):
         return len(self.samples)
@@ -260,6 +314,7 @@ class SignLanguageDataset:
         sample = {**self.samples[index]}
 
         if self.load_videos:
+            assert self.video_path is not None
             if self.is_tar_video:
                 sample["video"] = load_video_in_tar(
                     sample["id"],
