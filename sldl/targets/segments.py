@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Callable
 
 try:
     import torch
@@ -12,10 +12,18 @@ from sldl.targets import TargetEncoder
 
 
 class SegmentTarget(TargetEncoder):
-    def __init__(self, annotation_id: str = 'both_hands'):
+    def __init__(
+        self,
+        annotation_id: str = "both_hands",
+        segment_transform: Callable | None = None,
+    ):
         super().__init__()
         self.annotation_id = annotation_id
+        self.segment_transform = segment_transform
 
     def encode(self, sample: dict) -> Any:
-        annots = sample['annotations'][self.annotation_id]
-        return torch.from_numpy(annots.loc[:, ['start_frame', 'end_frame']].values).long()
+        annots = sample["annotations"][self.annotation_id]
+        segments = annots.loc[:, ["start_frame", "end_frame"]].values
+        if self.segment_transform is not None:
+            segments = self.segment_transform(segments)
+        return torch.from_numpy(segments).long()
