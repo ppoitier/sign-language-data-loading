@@ -18,6 +18,7 @@ def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
     def mapping_fn(raw_sample: dict) -> dict:
         sample = {
             "id": raw_sample["__key__"],
+            "signer-id": raw_sample.get("signer.txt"),
             "poses": {
                 body_part: raw_sample[f"pose.{body_part}.npy"]
                 for body_part in body_parts
