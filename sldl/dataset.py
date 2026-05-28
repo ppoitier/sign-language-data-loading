@@ -225,6 +225,15 @@ class SignLanguageDataset:
                     sample["targets"][target_name] = encoder.encode(sample)
             print("Target precomputed.")
 
+        self.id_to_idx = {
+            (
+                f"{sample['id']}_{sample['start']}_{sample['end']}"
+                if self.use_windows
+                else sample["id"]
+            ): idx
+            for idx, sample in enumerate(self.samples)
+        }
+
     def _build_windows(
         self, window_size: int, window_stride: int, max_empty_windows: int | None = None
     ):
@@ -345,3 +354,6 @@ class SignLanguageDataset:
                 sample["targets"][target_name] = encoder.encode(sample)
 
         return sample
+
+    def get_sample_by_id(self, sample_id: str):
+        return self.__getitem__(self.id_to_idx[sample_id])
