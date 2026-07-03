@@ -1,6 +1,7 @@
 from typing import Any
 
 from sldl.targets.target import TargetEncoder
+from sldl.utils.json import from_json_to_dict
 
 try:
     import torch
@@ -18,7 +19,7 @@ class ContinuousRecognitionTarget(TargetEncoder):
         self,
         annotation_id: str = "both_hands",
         column: str = "lemma",
-        label_to_id: dict[str, int] | None = None,
+        label_to_id: dict[str, int] | str | None = None,
         unknown_id: int = -1,
         unknown_label: str = '<unk>',
         pad_value: int = 0,
@@ -26,6 +27,8 @@ class ContinuousRecognitionTarget(TargetEncoder):
         self.annotation_id = annotation_id
         self.column = column
         self.label_to_id = label_to_id
+        if isinstance(self.label_to_id, str):
+            self.label_to_id = from_json_to_dict(self.label_to_id)
         self.unknown_id = unknown_id
         self.unknown_label = unknown_label
         self.pad_value = pad_value

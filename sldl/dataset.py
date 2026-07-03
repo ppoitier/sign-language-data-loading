@@ -7,9 +7,11 @@ import pandas as pd
 from tqdm import tqdm
 import webdataset as wds
 
+from sldl.config import SignLanguageDatasetConfig
 from sldl.utils.windows import convert_samples_to_windows, filter_empty_windows
 from sldl.utils.videos import load_video_in_dir, load_video_in_tar
 from sldl.utils.weighting import compute_class_weights
+from sldl.utils.urls import normalize_shards_url
 from sldl.targets.target import TargetEncoder
 
 
@@ -43,6 +45,7 @@ def _get_isolated_webdataset_mapping_fn(body_parts):
     def mapping_fn(sample: dict) -> dict:
         sample = {
             "id": sample["__key__"],
+            "signer-id": sample.get("signer.txt"),
             "poses": {
                 body_part: sample[f"pose.{body_part}.npy"] for body_part in body_parts
             },
@@ -125,6 +128,14 @@ class SignLanguageDataset:
         print(sample["label"])  # e.g. "HELLO"
     """
 
+    @classmethod
+    def from_config(cls, config: SignLanguageDatasetConfig) -> "SignLanguageDataset":
+        """Build a dataset from a :class:`SignLanguageDatasetConfig`."""
+        data = config.model_dump()
+        base_fields = SignLanguageDatasetConfig.model_fields.keys()
+        data = {key: value for key, value in data.items() if key in base_fields}
+        return cls(**data)
+
     def __init__(
         self,
         shards_url: str | list[str],
@@ -192,6 +203,7 @@ class SignLanguageDataset:
         else:
             mapping_fn = _get_continuous_webdataset_mapping_fn(body_parts, annotations)
 
+        shards_url = normalize_shards_url(shards_url)
         web_dataset = wds.DataPipeline(
             wds.SimpleShardList(shards_url),
             wds.split_by_worker,

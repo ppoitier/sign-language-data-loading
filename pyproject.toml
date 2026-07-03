@@ -19,4 +19,5 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "pydantic",
 ]
