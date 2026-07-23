@@ -2,10 +2,10 @@ from typing import Literal
 
 from pydantic import model_validator
 
-from sldl.config import SignLanguageDatasetConfig
+from sldl.configs.base import SignLanguageDatasetConfig
 
 LSFBIsolVariant = Literal["500", "750", "2000", "all"]
-LSFBIsolSplit = Literal["train", "eval", "test", "all"]
+LSFBIsolSplit = Literal["training", "validation", "testing", "all"]
 
 _BODY_PARTS = (
     "upper_pose",
@@ -15,6 +15,7 @@ _BODY_PARTS = (
     "left_eye",
     "right_eye",
 )
+# Other potential body parts (not by default) are right/left_iris, right/left_eyebrow
 
 
 class LSFBIsolConfig(SignLanguageDatasetConfig):
@@ -51,18 +52,19 @@ class LSFBIsolConfig(SignLanguageDatasetConfig):
             return data
         root = data.get("root")
         variant = data.get("variant")
-        split = data.get("split")
         if root and variant and not data.get("shards_url"):
-            if split == "train":
-                data["shards_url"] = f"{root}/shards/{variant}/shard_{{000000..000006}}.tar"
-            elif split == "eval":
-                data["shards_url"] = f"{root}/shards/{variant}/shard_{{000007..000008}}.tar"
-            elif split == "test":
-                data["shards_url"] = f"{root}/shards/{variant}/shard_000009.tar"
+            split = data["split"]
+            if split == "training":
+                shard_pattern = "shard_{000003..000009}.tar"
+            elif split == "validation":
+                shard_pattern = "shard_{000001..000002}.tar"
+            elif split == "testing":
+                shard_pattern = "shard_000000.tar"
             elif split == "all":
-                data["shards_url"] = f"{root}/shards/{variant}/shard_{{000000..000009}}.tar"
+                shard_pattern = "shard_{000000..000009}.tar"
             else:
-                raise ValueError(f"Unknown split {split}")
+                raise ValueError(f"Unknown split: {split}.")
+            data["shards_url"] = f"{root}/shards/{variant}/" + shard_pattern
         if root:
             data.setdefault("video_path", f"{root}/videos.tar")
             data.setdefault("video_index_path", f"{root}/videos.tar.index.json")
