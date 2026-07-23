@@ -18,6 +18,14 @@ def normalize_shard_url(url: str) -> str:
 
 
 def normalize_shards_url(shards_url: str | list[str]) -> str | list[str]:
+    """Apply `normalize_shard_url` to one shard URL or a list of them.
+
+    Args:
+        shards_url: A single shard URL/pattern, or a list of them.
+
+    Returns:
+        The normalized URL(s), in the same shape as the input.
+    """
     if isinstance(shards_url, (list, tuple)):
         return [normalize_shard_url(url) for url in shards_url]
     return normalize_shard_url(shards_url)

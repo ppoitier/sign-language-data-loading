@@ -12,6 +12,27 @@ except ImportError:
 
 
 class SignLanguageCollator:
+    """Collate function that pads variable-length `SignLanguageDataset` samples into batches.
+
+    Pads the `poses` tensors (and, if `targets` is set, any target that
+    defines a custom `collate`) to the longest sequence in the batch, and
+    casts `n_frames` / `start` / `end` to `torch.long` tensors. Requires
+    PyTorch.
+
+    Args:
+        create_masks: If `True`, add a boolean `masks` tensor (and a
+            `lengths` tensor) to the collated batch, derived from the
+            per-sample pose lengths.
+        pad_value: Padding value used for the `poses` tensors.
+        targets: A mapping of target names to `TargetEncoder` instances,
+            used to collate the `targets` dict of each sample (via each
+            encoder's `collate` method). Must match the `targets` passed to
+            the `SignLanguageDataset`.
+
+    Raises:
+        ImportError: If PyTorch is not installed.
+    """
+
     def __init__(
         self,
         create_masks: bool = True,
@@ -28,6 +49,18 @@ class SignLanguageCollator:
         self.targets = targets or {}
 
     def __call__(self, batch: list[dict[str, Any]]) -> dict[str, Any]:
+        """Collate a list of samples into a single padded batch.
+
+        Args:
+            batch: A list of samples, as returned by
+                `SignLanguageDataset.__getitem__`.
+
+        Returns:
+            A dict with the same keys as the input samples, with `poses`
+            padded and stacked, `n_frames`/`start`/`end` cast to tensors,
+            `targets` collated per-target (if `targets` was set), and,
+            if `create_masks=True`, additional `masks` and `lengths` keys.
+        """
         keys = batch[0].keys()
         collated: dict[str, Any] = {k: [b[k] for b in batch] for k in keys}
 

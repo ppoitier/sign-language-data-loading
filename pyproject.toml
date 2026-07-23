@@ -2,22 +2,46 @@
 requires = ["setuptools>=80.10"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-py-modules = ['sldl']
-
 [project]
-name = "sldl"
-version = "0.0.1"
+name = "sign-language-data-loading"
+version = "1.0.0"
 authors = [
     { name="Pierre Poitier", email="pierre.poitier@unamur.be" },
 ]
-description = "Sign Language Data Loading"
+description = "Efficient data loading utilities for sign language datasets."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "numpy",
+    "pandas",
     "pydantic",
+    "tqdm",
+    "webdataset",
 ]
+
+[project.optional-dependencies]
+# Required by SignLanguageCollator and by the built-in TargetEncoder
+# implementations (sldl.targets.*).
+torch = [
+    "torch",
+    "sign-language-tools",
+]
+# Required for on-the-fly video loading (load_videos=True).
+video = [
+    "torchcodec",
+]
+dev = [
+    "pytest",
+]
+
+[project.urls]
+Repository = "https://github.com/ppoitier/sign-language-data-loading"
+
+[tool.setuptools.packages.find]
+include = ["sldl*"]

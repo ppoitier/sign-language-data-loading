@@ -24,14 +24,15 @@ class LSFBIsolConfig(SignLanguageDatasetConfig):
     `shards_url`, `video_path` and `video_index_path` are derived from
     `root` / `variant` / `split` unless explicitly overridden.
 
-    Example::
-
+    Example:
+        ```python
         config = LSFBIsolConfig(
             root="F:/datasets/sign-language/lsfb-isol",
             variant="500",
-            split="train",
+            split="training",
         )
         ds = SignLanguageDataset.from_config(config)
+        ```
     """
 
     root: str
@@ -43,11 +44,20 @@ class LSFBIsolConfig(SignLanguageDatasetConfig):
     body_parts: tuple[str, ...] = _BODY_PARTS
     annotations: None = None
     show_loading_progress: bool = True
-    load_videos: bool = True
+    load_videos: bool = False
 
     @model_validator(mode="before")
     @classmethod
     def _fill_derived_paths(cls, data):
+        """Derive `shards_url`, `video_path` and `video_index_path` from `root`/`variant`/`split`.
+
+        Args:
+            data: Raw field values passed to the model constructor.
+
+        Returns:
+            The updated `data` dict, with derived fields filled in wherever
+            they were not explicitly provided.
+        """
         if not isinstance(data, dict):
             return data
         root = data.get("root")
@@ -72,6 +82,11 @@ class LSFBIsolConfig(SignLanguageDatasetConfig):
 
     @model_validator(mode="after")
     def _check_shards_url(self) -> "LSFBIsolConfig":
+        """Ensure `shards_url` was either provided or successfully derived.
+
+        Raises:
+            ValueError: If `shards_url` is still unset after derivation.
+        """
         if not self.shards_url:
             raise ValueError("`shards_url` could not be derived; check `root`/`variant`/`split`.")
         return self

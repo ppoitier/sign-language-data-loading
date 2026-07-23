@@ -25,13 +25,14 @@ class LSFBContConfig(SignLanguageDatasetConfig):
     `shards_url`, `video_path` and `video_index_path` are derived from
     `root` / `split` unless explicitly overridden.
 
-    Example::
-
+    Example:
+        ```python
         config = LSFBContConfig(
             root="F:/datasets/sign-language/lsfb-cont",
-            split="train",
+            split="training",
         )
         ds = SignLanguageDataset.from_config(config)
+        ```
     """
 
     root: str
@@ -48,6 +49,15 @@ class LSFBContConfig(SignLanguageDatasetConfig):
     @model_validator(mode="before")
     @classmethod
     def _fill_derived_paths(cls, data):
+        """Derive `shards_url`, `video_path` and `video_index_path` from `root`/`split`.
+
+        Args:
+            data: Raw field values passed to the model constructor.
+
+        Returns:
+            The updated `data` dict, with derived fields filled in wherever
+            they were not explicitly provided.
+        """
         if not isinstance(data, dict):
             return data
         root = data.get("root")
@@ -71,6 +81,11 @@ class LSFBContConfig(SignLanguageDatasetConfig):
 
     @model_validator(mode="after")
     def _check_shards_url(self) -> "LSFBContConfig":
+        """Ensure `shards_url` was either provided or successfully derived.
+
+        Raises:
+            ValueError: If `shards_url` is still unset after derivation.
+        """
         if not self.shards_url:
             raise ValueError("`shards_url` could not be derived; check `root`/`variant`/`split`.")
         return self

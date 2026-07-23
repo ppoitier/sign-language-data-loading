@@ -15,6 +15,24 @@ def load_video_in_dir(
         start_frame: int | None = None,
         end_frame: int | None = None,
 ):
+    """Load (a slice of) a video file from a directory.
+
+    Args:
+        sample_id: Sample id; the video is expected at
+            `<video_dir>/<sample_id>.mp4`.
+        video_dir: Directory containing the video files.
+        start_frame: First frame to include (inclusive). Defaults to the
+            start of the video.
+        end_frame: Last frame to include (exclusive). Defaults to the end
+            of the video.
+
+    Returns:
+        A `torch.Tensor` of decoded frames, with shape `(N, C, H, W)`.
+
+    Raises:
+        ImportError: If `torchcodec` is not installed.
+        FileNotFoundError: If the video file does not exist.
+    """
     if not _HAS_TORCHCODEC:
         raise ImportError(
             "Loading videos requires the 'torchcodec' package. "
@@ -40,6 +58,26 @@ def load_video_in_tar(
     start_frame: int | None = None,
     end_frame: int | None = None,
 ):
+    """Load (a slice of) a video file stored inside a `.tar` archive.
+
+    Args:
+        sample_id: Sample id used to look up the video in `tar_index`
+            (with or without the `.mp4` extension).
+        tar_path: Path to the `.tar` archive containing the video.
+        tar_index: Mapping from member name to `(offset, size)` within the
+            archive, as produced when the archive was built.
+        start_frame: First frame to include (inclusive). Defaults to the
+            start of the video.
+        end_frame: Last frame to include (exclusive). Defaults to the end
+            of the video.
+
+    Returns:
+        A `torch.Tensor` of decoded frames, with shape `(N, C, H, W)`.
+
+    Raises:
+        ImportError: If `torchcodec` is not installed.
+        KeyError: If `sample_id` is not found in `tar_index`.
+    """
     if not _HAS_TORCHCODEC:
         raise ImportError(
             "Loading videos requires the 'torchcodec' package. "

@@ -28,6 +28,15 @@ class TemporalBoundaryOffsetsTarget(TargetEncoder):
     Output shape (after collate): (batch, 2, time), where channel 0 is
     `start_offset` and channel 1 is `end_offset`. Background frames carry
     `pad_value` in both channels.
+
+    Args:
+        annotation_id: Key of the annotation track to read from
+            `sample["annotations"]`.
+        background_value: Offset value assigned to background frames (frames
+            outside any segment).
+        pad_value: Padding value used when collating a batch.
+        segment_transform: A callable applied to the `(N, 2)` segments array
+            before rendering.
     """
 
     def __init__(
@@ -47,6 +56,18 @@ class TemporalBoundaryOffsetsTarget(TargetEncoder):
         )
 
     def encode(self, sample: dict) -> Any:
+        """Render the per-frame boundary-offset tensor for a single sample.
+
+        Args:
+            sample: The raw sample dict. Must contain `n_frames` and, unless
+                the annotation track is missing/empty, an
+                `sample["annotations"][self.annotation_id]` DataFrame with
+                `start_frame` / `end_frame` columns.
+
+        Returns:
+            A `(n_frames, 2)` `torch.float32` tensor of
+            `(start_offset, end_offset)` pairs.
+        """
         n_frames = sample.get("n_frames", 0)
         annotations = sample.get("annotations", {}).get(self.annotation_id)
 
@@ -62,6 +83,16 @@ class TemporalBoundaryOffsetsTarget(TargetEncoder):
         return torch.from_numpy(offsets)
 
     def collate(self, batch_targets: list[Any]) -> Any:
+        """Pad and stack a batch of boundary-offset tensors.
+
+        Args:
+            batch_targets: The list of per-sample `(n_frames, 2)` tensors,
+                as returned by `encode`.
+
+        Returns:
+            A `(batch, 2, max_n_frames)` tensor, padded with
+            `self.pad_value`.
+        """
         # pad_sequence stacks along time axis: (batch, time, 2).
         # Permute to channel-first (batch, 2, time) for sequence models.
         return pad_sequence(

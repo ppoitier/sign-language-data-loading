@@ -16,7 +16,17 @@ from sldl.targets.target import TargetEncoder
 
 
 def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
-    # annotations: dict[str, list[str] | None] or None
+    """Build the `webdataset.map` function for continuous-mode samples.
+
+    Args:
+        body_parts: Pose body parts to extract from each raw sample.
+        annotations: `dict[str, list[str] | None]` of annotation ids to load,
+            or `None` to skip annotations entirely.
+
+    Returns:
+        A callable to pass to `webdataset.map`.
+    """
+
     def mapping_fn(raw_sample: dict) -> dict:
         sample = {
             "id": raw_sample["__key__"],
@@ -42,10 +52,19 @@ def _get_continuous_webdataset_mapping_fn(body_parts, annotations):
 
 
 def _get_isolated_webdataset_mapping_fn(body_parts):
+    """Build the `webdataset.map` function for isolated-mode samples.
+
+    Args:
+        body_parts: Pose body parts to extract from each raw sample.
+
+    Returns:
+        A callable to pass to `webdataset.map`.
+    """
+
     def mapping_fn(sample: dict) -> dict:
         sample = {
             "id": sample["__key__"],
-            "signer-id": sample.get("signer.txt"),
+            "signer_id": sample.get("signer.txt"),
             "poses": {
                 body_part: sample[f"pose.{body_part}.npy"] for body_part in body_parts
             },
@@ -90,7 +109,7 @@ class SignLanguageDataset:
             ``__getitem__`` time.
         annotation_transform: A callable applied to annotations (reserved for
             future use).
-        targets: A mapping of target names to :class:`TargetEncoder` instances.
+        targets: A mapping of target names to `TargetEncoder` instances.
             Each encoder is called on the sample to produce a target value.
         precompute_targets: If ``True``, encode all targets once at load time
             rather than on every ``__getitem__`` call.
@@ -109,8 +128,8 @@ class SignLanguageDataset:
         show_loading_progress: If ``True``, display a ``tqdm`` progress bar
             while loading shards.
 
-    Example::
-
+    Example:
+        ```python
         # Continuous dataset with windowing
         ds = SignLanguageDataset(
             "data/shards-{000..003}.tar",
@@ -126,11 +145,22 @@ class SignLanguageDataset:
         )
         sample = ds[0]
         print(sample["label"])  # e.g. "HELLO"
+        ```
     """
 
     @classmethod
     def from_config(cls, config: SignLanguageDatasetConfig) -> "SignLanguageDataset":
-        """Build a dataset from a :class:`SignLanguageDatasetConfig`."""
+        """Build a dataset from a `SignLanguageDatasetConfig`.
+
+        Args:
+            config: The configuration describing how to build the dataset.
+                Fields that are not part of `SignLanguageDatasetConfig`
+                itself (e.g. extra fields defined by a subclass such as
+                `LSFBContConfig`) are ignored.
+
+        Returns:
+            The constructed dataset.
+        """
         data = config.model_dump()
         base_fields = SignLanguageDatasetConfig.model_fields.keys()
         data = {key: value for key, value in data.items() if key in base_fields}
@@ -249,6 +279,14 @@ class SignLanguageDataset:
     def _build_windows(
         self, window_size: int, window_stride: int, max_empty_windows: int | None = None
     ):
+        """Split `self.samples` into overlapping temporal windows in place.
+
+        Args:
+            window_size: Window length in milliseconds.
+            window_stride: Stride between consecutive windows in milliseconds.
+            max_empty_windows: If set, discard windows without annotations
+                beyond this count (requires `self.annotation_ids` to be set).
+        """
         print(f"Building windows of size {window_size} with stride {window_stride}...")
         n_instances = len(self.samples)
         self.samples = convert_samples_to_windows(
@@ -276,6 +314,17 @@ class SignLanguageDataset:
             - Sequence targets (e.g., per-frame labels) — flattened before counting
 
         Requires the target to have been precomputed (``precompute_targets=True``).
+
+        Args:
+            target_name: Name of the target, as registered in `self.targets`.
+
+        Returns:
+            A `Counter` mapping each label id to its number of occurrences.
+
+        Raises:
+            ValueError: If `target_name` is not a known target.
+            RuntimeError: If the dataset was not built with
+                `precompute_targets=True`.
         """
         if not self.targets or target_name not in self.targets:
             raise ValueError(f"Unknown target: {target_name!r}")
@@ -298,6 +347,15 @@ class SignLanguageDataset:
         return counter
 
     def get_label_frequencies(self, target_name: str) -> dict:
+        """Compute the relative frequency of each label for a precomputed target.
+
+        Args:
+            target_name: Name of the target, as registered in `self.targets`.
+
+        Returns:
+            A dict mapping each label id to its frequency (occurrences divided
+            by the total number of occurrences).
+        """
         occurrences = self.get_label_occurrences(target_name)
         total = sum(occurrences.values())
         return {label: count / total for label, count in occurrences.items()}
@@ -314,9 +372,24 @@ class SignLanguageDataset:
     ) -> dict:
         """Compute per-class weights suitable for long-tail distributions.
 
-        See: func:`sldl.utils.weighting.compute_class_weights` for available
+        See `sldl.utils.weighting.compute_class_weights` for available
         strategies. The default "effective_number" (Cui et al., 2019) is
         generally a good choice for sign language datasets.
+
+        Args:
+            target_name: Name of the target, as registered in `self.targets`.
+            strategy: Weighting strategy. See
+                `sldl.utils.weighting.compute_class_weights`.
+            alpha: Exponent used by the "power" strategy.
+            beta: Decay rate used by the "effective_number" strategy.
+            log_offset: Offset added before taking the log in the "log"
+                strategy.
+            median_clip: If set, clip each weight to
+                `median_clip * median(weights)`.
+            normalize: If `True`, rescale weights so their mean is 1.
+
+        Returns:
+            A dict mapping each label id to its weight.
         """
         occurrences = self.get_label_occurrences(target_name)
         return compute_class_weights(
@@ -329,10 +402,20 @@ class SignLanguageDataset:
             normalize=normalize,
         )
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Return the number of samples (or windows, if `use_windows=True`)."""
         return len(self.samples)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> dict:
+        """Return a sample, applying transforms and encoding targets on the fly.
+
+        Args:
+            index: Index of the sample (or window) to retrieve.
+
+        Returns:
+            The sample dict, with `poses` (and `video`, if `load_videos=True`)
+            transformed, and `targets` encoded if `precompute_targets=False`.
+        """
         sample = {**self.samples[index]}
 
         if self.load_videos:
@@ -367,5 +450,17 @@ class SignLanguageDataset:
 
         return sample
 
-    def get_sample_by_id(self, sample_id: str):
+    def get_sample_by_id(self, sample_id: str) -> dict:
+        """Return a sample by its id instead of its positional index.
+
+        Args:
+            sample_id: The sample `id` (or, if `use_windows=True`, the
+                `window_id` in the form `"<id>_<start>_<end>"`).
+
+        Returns:
+            The sample dict, as returned by `__getitem__`.
+
+        Raises:
+            KeyError: If `sample_id` is not found in the dataset.
+        """
         return self.__getitem__(self.id_to_idx[sample_id])

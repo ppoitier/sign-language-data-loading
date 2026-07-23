@@ -7,17 +7,20 @@ from sldl.targets.target import TargetEncoder
 
 
 class SignLanguageDatasetConfig(BaseModel):
-    """Configuration for :class:`sldl.dataset.SignLanguageDataset`.
+    """Configuration for `sldl.dataset.SignLanguageDataset`.
 
-    Mirrors the constructor parameters of ``SignLanguageDataset``. Instantiate
+    Mirrors the constructor parameters of `SignLanguageDataset`. Instantiate
     directly, or subclass it to define reusable presets for specific datasets
-    (overriding only the fields that differ from the defaults)::
+    (overriding only the fields that differ from the defaults).
 
+    Example:
+        ```python
         class MyDatasetContinuousConfig(SignLanguageDatasetConfig):
             shards_url: str = "data/my-dataset-{000..003}.tar"
             annotations: dict[str, list[str] | None] = {"both_hands": ["lemma"]}
 
         ds = SignLanguageDataset.from_config(MyDatasetContinuousConfig())
+        ```
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
@@ -80,6 +83,11 @@ class SignLanguageDatasetConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_video_path(self) -> "SignLanguageDatasetConfig":
+        """Ensure `video_path` is set whenever `load_videos=True`.
+
+        Raises:
+            ValueError: If `load_videos=True` and `video_path` is not set.
+        """
         if self.load_videos and not self.video_path:
             raise ValueError("`video_path` must be set when `load_videos=True`.")
         return self

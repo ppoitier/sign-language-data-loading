@@ -28,6 +28,25 @@ def compute_class_weights(
           classification. beta=0.999 is the standard value.
 
     When normalize is True, weights are rescaled so their mean is 1.
+
+    Args:
+        occurrences: Mapping from label to its occurrence count.
+        strategy: One of the strategies listed above.
+        alpha: Exponent used by the "power" strategy. Must be in `[0, 1]`.
+        beta: Decay rate used by the "effective_number" strategy. Must be
+            in `[0, 1)`.
+        log_offset: Offset added before taking the log in the "log"
+            strategy. Must be `> 1`.
+        median_clip: If set, clip each weight to
+            `median_clip * median(weights)`.
+        normalize: If `True`, rescale weights so their mean is 1.
+
+    Returns:
+        A dict mapping each label to its weight.
+
+    Raises:
+        ValueError: If any count is non-positive, if `strategy` is unknown,
+            or if `alpha`/`beta`/`log_offset` is out of its valid range.
     """
     labels = list(occurrences.keys())
     counts = np.array([occurrences[l] for l in labels], dtype=np.float64)

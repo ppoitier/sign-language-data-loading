@@ -7,16 +7,18 @@ import pandas as pd
 def compute_window_indices(
     sequence_length: int, window_size: int, stride: int
 ) -> np.ndarray:
-    """
-    Compute the start and end indices for each window, including a possibly shorter last window.
+    """Compute the start and end indices for each window.
+
+    Includes a possibly shorter last window if `sequence_length` is not an
+    exact multiple of `stride`.
 
     Args:
-        sequence_length: Total length of the sequence
-        window_size: Size of each window
-        stride: Stride between windows
+        sequence_length: Total length of the sequence.
+        window_size: Size of each window.
+        stride: Stride between windows.
 
     Returns:
-        np.ndarray: Array of shape (n_windows, 2) containing start and end indices for each window
+        A `(n_windows, 2)` array of `(start, end)` indices for each window.
     """
     start_indices = np.arange(0, sequence_length, stride)
     end_indices = np.minimum(start_indices + window_size, sequence_length)
@@ -27,8 +29,22 @@ def compute_window_indices(
 def _get_annotations_in_window(
     annotations: pd.DataFrame, window_start: int, window_end: int
 ) -> pd.DataFrame:
-    """
-    Filters, clips, and shifts annotations to fit within a specific window.
+    """Filter, clip, and shift annotations to fit within a specific window.
+
+    Args:
+        annotations: Annotation DataFrame with `start_frame` / `end_frame`
+            columns (and optionally `start_ms` / `end_ms`).
+        window_start: Start frame of the window (inclusive).
+        window_end: End frame of the window (exclusive).
+
+    Returns:
+        The subset of `annotations` overlapping the window, with
+        `start_frame` / `end_frame` (and `start_ms` / `end_ms`, if present)
+        clipped to the window bounds and shifted to be window-relative.
+
+    Raises:
+        ValueError: If `annotations` lacks `start_frame` / `end_frame`
+            columns.
     """
     if not {"start_frame", "end_frame"}.issubset(annotations.columns):
         raise ValueError(
@@ -80,6 +96,23 @@ def _get_window(
     ignored_keys: set[str] | None = None,
     custom_window_functions: dict | None = None,
 ) -> dict:
+    """Recursively slice a sample (or nested dict) to a `[start, end)` window.
+
+    Args:
+        data: The value to slice — an array/list is sliced directly, a dict
+            is recursed into, anything else is returned unchanged.
+        start: Start index of the window (inclusive).
+        end: End index of the window (exclusive).
+        add_window_metadata: If `True` (and `data` is a dict), add `start`,
+            `end` and `n_frames` keys to the returned dict.
+        ignored_keys: Dict keys to skip (kept out of the returned dict).
+        custom_window_functions: Mapping from dict key to a
+            `(value, start, end) -> value` callable, used instead of the
+            default recursive slicing for that key (e.g. for annotations).
+
+    Returns:
+        The windowed value, with the same shape as `data`.
+    """
     if isinstance(data, np.ndarray) or isinstance(data, list):
         return data[start:end]
     elif isinstance(data, dict):
@@ -109,6 +142,18 @@ def _get_window(
 def _get_all_windows_from_sample(
     sample: dict, window_size: int, window_stride: int
 ) -> list[dict]:
+    """Split a single sample into overlapping temporal windows.
+
+    Args:
+        sample: The sample dict. Must contain `n_frames` and, if present,
+            an `annotations` dict of DataFrames keyed by annotation id.
+        window_size: Window length, in the same unit as `sample["n_frames"]`.
+        window_stride: Stride between consecutive windows.
+
+    Returns:
+        A list of windowed sample dicts, each with added `start`, `end` and
+        `n_frames` keys.
+    """
     window_indices = compute_window_indices(
         sample["n_frames"], window_size, window_stride
     )
@@ -132,6 +177,17 @@ def _get_all_windows_from_sample(
 def convert_samples_to_windows(
     samples: list[dict], window_size: int, window_stride: int
 ):
+    """Split every sample in a list into overlapping temporal windows.
+
+    Args:
+        samples: The samples to split, as produced by the WebDataset
+            mapping functions in `sldl.dataset`.
+        window_size: Window length, in the same unit as `sample["n_frames"]`.
+        window_stride: Stride between consecutive windows.
+
+    Returns:
+        The flattened list of windowed samples across all input samples.
+    """
     return sum(
         [
             _get_all_windows_from_sample(sample, window_size, window_stride)
@@ -142,6 +198,21 @@ def convert_samples_to_windows(
 
 
 def filter_empty_windows(samples: list[dict], max_empty_windows: int):
+    """Randomly drop windows that contain no annotations, down to a limit.
+
+    A window is considered empty if every annotation track in its
+    `annotations` dict is empty. If there are more empty windows than
+    `max_empty_windows`, a random subset of `max_empty_windows` of them is
+    kept and the rest are dropped; non-empty windows are always kept.
+
+    Args:
+        samples: Windowed samples, each with an `annotations` dict of
+            DataFrames keyed by annotation id.
+        max_empty_windows: Maximum number of empty windows to keep.
+
+    Returns:
+        The filtered list of samples.
+    """
     empty_window_indices = [
         index
         for index, sample in enumerate(samples)
