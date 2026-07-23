@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.png" alt="sign-language-data-loading" width="720">
+  <img src="https://ppoitier.github.io/sign-language-tools/figures/example_sample.jpg" alt="sign-language-data-loading" width="720">
 </p>
 
 # sign-language-data-loading (sldl)
@@ -83,3 +83,9 @@ print(batch["masks"].shape)                 # (batch, max_n_frames)
 
 - Custom dataset paths, windowing, and target encoders: see `SignLanguageDataset` and `sldl.targets`.
 - Full worked examples (loading, visualizing poses/video, windowing, target encoding) are in [`examples/`](examples/).
+
+## Related projects
+
+- [sign-language-tools](https://github.com/ppoitier/sign-language-tools) ([PyPI](https://pypi.org/project/sign-language-tools/)) — pose and annotation transforms (e.g. `SegmentsToFrameLabels`, `SegmentsToBoundaryOffsets`) used by some of the built-in target encoders (`sldl.targets.FrameLabelsTarget`, `sldl.targets.TemporalBoundaryOffsetsTarget`).
+- [lsfb-cont dataset](https://huggingface.co/datasets/ppoitier/lsfb-cont) — French-Belgian Sign Language (LSFB) dataset, available on HuggingFace. It is very useful for Sign Language Processing tasks that requires a Continuous Sign Language Dataset, such as Continuous Sign Language Recognition (CSLR) and Sign Language Segmentation (SLS).
+- [lsfb-isol dataset](https://huggingface.co/datasets/ppoitier/lsfb-isol) — Isolated version, i.e. ONE sign per video, of the LSFB dataset. Very useful for Isolated Sign Language Recognition (ISLR).
