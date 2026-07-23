@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sign-language-data-loading"
-version = "1.0.0"
+version = "1.0.1"
 authors = [
     { name="Pierre Poitier", email="pierre.poitier@unamur.be" },
 ]
