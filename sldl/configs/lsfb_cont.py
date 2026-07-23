@@ -41,7 +41,7 @@ class LSFBContConfig(SignLanguageDatasetConfig):
 
     body_parts: tuple[str, ...] = _BODY_PARTS
     show_loading_progress: bool = True
-    load_videos: bool = True
+    load_videos: bool = False
     targets: dict[str, TargetEncoder] | None = Field(
         default_factory=lambda: {"frame-labels": FrameLabelsTarget()}
     )
