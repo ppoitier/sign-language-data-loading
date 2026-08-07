@@ -4,7 +4,7 @@ from pydantic import model_validator
 
 from sldl.configs.base import SignLanguageDatasetConfig
 
-LSFBIsolVariant = Literal["500", "750", "2000", "all"]
+LSFBIsolVariant = Literal["500", "750", "2000", "all", "500-depth-anything-small"]
 LSFBIsolSplit = Literal["training", "validation", "testing", "all"]
 
 _BODY_PARTS = (
