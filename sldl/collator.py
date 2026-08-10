@@ -15,7 +15,7 @@ __all__ = ["SignLanguageCollator"]
 
 
 def _collate_sequence(
-    seqs: list[Any], pad_value: float
+    seqs: list[Any], pad_value: float, fixed_length: int | None = None
 ) -> tuple["torch.Tensor", "torch.Tensor"]:
     """Pad and stack a list of time-major sequences along a new batch dimension.
 
@@ -24,27 +24,54 @@ def _collate_sequence(
             `torch.as_tensor` (numpy arrays included) works; tensors are used
             as-is, without a copy.
         pad_value: Value written in the padded region.
+        fixed_length: If given, pad every sequence to this length instead of
+            the batch's own longest sequence. Raises if a sequence is longer
+            than `fixed_length`. Useful to bound `T_max` to a constant across
+            batches, e.g. so a `torch.compile`-d model sees a fixed number of
+            distinct shapes instead of recompiling for every batch.
 
     Returns:
         A tuple `(padded, lengths)` where `padded` has shape
-        `(B, T_max, ...)` and `lengths` is a `torch.long` tensor of shape
-        `(B,)` holding the original `T_i`.
+        `(B, T_max, ...)` (`T_max` being `fixed_length` when given) and
+        `lengths` is a `torch.long` tensor of shape `(B,)` holding the
+        original `T_i`.
     """
     if not torch.is_tensor(seqs[0]):
         seqs = [torch.as_tensor(s) for s in seqs]
 
     lengths = [s.shape[0] for s in seqs]
-    max_len = max(lengths)
-    # Fixed-length batches (windowed / cropped datasets) skip padding entirely:
-    # a single fused `stack` is cheaper than `pad_sequence`.
-    if min(lengths) == max_len:
-        padded = torch.stack(seqs, 0)
+    natural_max_len = max(lengths)
+    if fixed_length is not None:
+        if natural_max_len > fixed_length:
+            raise ValueError(
+                f"Got a sequence of length {natural_max_len}, which exceeds "
+                f"fixed_length={fixed_length}."
+            )
+        target_len = fixed_length
     else:
+        target_len = natural_max_len
+
+    # Batches where every sequence already has the target length (windowed /
+    # cropped datasets, or fixed_length matching the batch exactly) skip
+    # padding entirely: a single fused `stack` is cheaper than padding.
+    if min(lengths) == target_len:
+        padded = torch.stack(seqs, 0)
+    elif target_len == natural_max_len:
         padded = pad_sequence(seqs, batch_first=True, padding_value=pad_value)
+    else:
+        # `pad_sequence` only pads to the longest sequence given to it, so a
+        # `target_len` beyond the batch's own max needs manual placement.
+        padded = seqs[0].new_full(
+            (len(seqs), target_len, *seqs[0].shape[1:]), pad_value
+        )
+        for i, s in enumerate(seqs):
+            padded[i, : s.shape[0]] = s
     return padded, torch.tensor(lengths, dtype=torch.long)
 
 
-def _collate_field(values: list[Any], pad_value: float) -> tuple[Any, Any]:
+def _collate_field(
+    values: list[Any], pad_value: float, fixed_length: int | None = None
+) -> tuple[Any, Any]:
     """Collate one sample field, preserving its container structure.
 
     Dispatches on the structure of the first sample:
@@ -57,6 +84,8 @@ def _collate_field(values: list[Any], pad_value: float) -> tuple[Any, Any]:
     Args:
         values: The per-sample values of a single field, one entry per sample.
         pad_value: Value written in the padded region.
+        fixed_length: If given, pad every sequence (and every view) to this
+            length instead of the batch's own longest sequence.
 
     Returns:
         A tuple `(collated, lengths)`. `collated` mirrors the input structure
@@ -72,7 +101,7 @@ def _collate_field(values: list[Any], pad_value: float) -> tuple[Any, Any]:
         lengths: Any = None
         for key in first:
             collated[key], key_lengths = _collate_field(
-                [v[key] for v in values], pad_value
+                [v[key] for v in values], pad_value, fixed_length
             )
             if lengths is None:
                 lengths = key_lengths
@@ -82,29 +111,34 @@ def _collate_field(values: list[Any], pad_value: float) -> tuple[Any, Any]:
         views, view_lengths = [], []
         for view_idx in range(len(first)):
             padded, lengths = _collate_sequence(
-                [v[view_idx] for v in values], pad_value
+                [v[view_idx] for v in values], pad_value, fixed_length
             )
             views.append(padded)
             view_lengths.append(lengths)
         return tuple(views), tuple(view_lengths)
 
-    return _collate_sequence(values, pad_value)
+    return _collate_sequence(values, pad_value, fixed_length)
 
 
-def _masks_from_lengths(lengths: Any) -> Any:
+def _masks_from_lengths(lengths: Any, fixed_length: int | None = None) -> Any:
     """Build boolean padding masks from sequence lengths.
 
     Args:
         lengths: A `(B,)` tensor of lengths, or a tuple of such tensors (one
             per view).
+        fixed_length: The `T_max` the matching field was padded to. Must
+            match what was passed to `_collate_field`, otherwise the mask
+            width would not agree with the padded tensor's shape. Defaults to
+            `lengths.max()`, i.e. the batch's own longest sequence.
 
     Returns:
         A `(B, T_max)` boolean tensor that is `True` on real frames and
         `False` on padding, or a tuple of such tensors mirroring the input.
     """
     if isinstance(lengths, tuple):
-        return tuple(_masks_from_lengths(length) for length in lengths)
-    return torch.arange(lengths.max()) < lengths.unsqueeze(1)
+        return tuple(_masks_from_lengths(length, fixed_length) for length in lengths)
+    t_max = fixed_length if fixed_length is not None else lengths.max()
+    return torch.arange(t_max) < lengths.unsqueeze(1)
 
 
 class SignLanguageCollator:
@@ -119,7 +153,8 @@ class SignLanguageCollator:
     untouched as plain Python lists.
 
     Shapes:
-        With `B` the batch size and `T_max` the longest sequence in the batch:
+        With `B` the batch size and `T_max` the longest sequence in the batch
+        (or `fixed_length`, when set):
 
         | Field       | Per sample     | Collated             |
         |-------------|----------------|----------------------|
@@ -153,6 +188,11 @@ class SignLanguageCollator:
         video_pad_value: Padding value used for the `video` tensors. Kept
             separate from `pad_value` because poses are often padded with a
             sentinel value that would be meaningless for pixels.
+        fixed_length: If given, pad every sequence (`poses` and `video`, every
+            view) to this constant `T_max` instead of the batch's own longest
+            sequence. Raises if a sample is longer than `fixed_length`. Useful
+            to keep a `torch.compile`-d model from recompiling on every new
+            sequence length it encounters.
         targets: A mapping of target names to `TargetEncoder` instances, used
             to collate the `targets` dict of each sample (via each encoder's
             `collate` method). Must match the `targets` passed to the
@@ -194,6 +234,7 @@ class SignLanguageCollator:
         pad_value: float = 0.0,
         pad_videos: bool = True,
         video_pad_value: float = 0.0,
+        fixed_length: int | None = None,
         targets: dict[str, TargetEncoder] | None = None,
     ) -> None:
         if not _TORCH_AVAILABLE:
@@ -205,6 +246,7 @@ class SignLanguageCollator:
         self.pad_value: float = pad_value
         self.pad_videos: bool = pad_videos
         self.video_pad_value: float = video_pad_value
+        self.fixed_length: int | None = fixed_length
         self.targets = targets or {}
 
     def __call__(self, batch: list[dict[str, Any]]) -> dict[str, Any]:
@@ -237,7 +279,7 @@ class SignLanguageCollator:
 
         if "poses" in collated and collated["poses"][0] is not None:
             collated["poses"], lengths = _collate_field(
-                collated["poses"], self.pad_value
+                collated["poses"], self.pad_value, self.fixed_length
             )
 
         if (
@@ -246,7 +288,7 @@ class SignLanguageCollator:
             and collated["video"][0] is not None
         ):
             collated["video"], video_lengths = _collate_field(
-                collated["video"], self.video_pad_value
+                collated["video"], self.video_pad_value, self.fixed_length
             )
             # Poses are the reference for masks; videos only fill in when the
             # batch carries no pose data.
@@ -254,7 +296,7 @@ class SignLanguageCollator:
                 lengths = video_lengths
 
         if self.create_masks and lengths is not None:
-            collated["masks"] = _masks_from_lengths(lengths)
+            collated["masks"] = _masks_from_lengths(lengths, self.fixed_length)
             collated["lengths"] = lengths
 
         if self.targets and "targets" in collated:
