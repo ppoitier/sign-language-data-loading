@@ -27,6 +27,15 @@ class ContinuousRecognitionTarget(TargetEncoder):
         unknown_label: Placeholder used for missing/NaN label values.
         pad_value: Padding value used when collating a batch (only used
             when `label_to_id` is set).
+        collapse_adjacent_duplicates: If True, consecutive repeated labels
+            (e.g. two annotation rows with the same lemma back-to-back) are
+            merged into a single occurrence. CTC needs a blank between two
+            adjacent-identical target labels to keep them distinguishable
+            after decoding's repeat-collapsing step, so a raw sequence with
+            adjacent duplicates silently raises the input length required
+            for that window to be CTC-feasible. Off by default to preserve
+            the exact annotated sequence for consumers that don't train
+            with CTC.
     """
 
     def __init__(
@@ -37,6 +46,7 @@ class ContinuousRecognitionTarget(TargetEncoder):
         unknown_id: int = -1,
         unknown_label: str = '<unk>',
         pad_value: int = 0,
+        collapse_adjacent_duplicates: bool = False,
     ):
         self.annotation_id = annotation_id
         self.column = column
@@ -46,6 +56,7 @@ class ContinuousRecognitionTarget(TargetEncoder):
         self.unknown_id = unknown_id
         self.unknown_label = unknown_label
         self.pad_value = pad_value
+        self.collapse_adjacent_duplicates = collapse_adjacent_duplicates
 
     def encode(self, sample: dict) -> Any:
         """Extract the label sequence for a single sample.
@@ -65,7 +76,23 @@ class ContinuousRecognitionTarget(TargetEncoder):
         else:
             sequence = annotations[self.column].fillna(self.unknown_label).tolist()
 
+        if self.collapse_adjacent_duplicates:
+            sequence = [label for i, label in enumerate(sequence) if i == 0 or label != sequence[i - 1]]
+
         if self.label_to_id is not None:
+            if self.unknown_id < 0:
+                # A negative unknown_id can never be a valid downstream class id (e.g.
+                # embedding lookups, F.ctc_loss targets), so silently falling back to it
+                # doesn't fail until it corrupts memory on the GPU. Fail loudly here instead.
+                for label in sequence:
+                    if label not in self.label_to_id:
+                        raise KeyError(
+                            f"Label {label!r} is missing from label_to_id "
+                            f"(annotation_id={self.annotation_id!r}, column={self.column!r}), "
+                            f"and unknown_id={self.unknown_id} is negative -- not a valid class id. "
+                            "Add the label to the vocabulary, or pass a valid non-negative "
+                            "unknown_id if out-of-vocabulary labels are expected."
+                        )
             return [self.label_to_id.get(label, self.unknown_id) for label in sequence]
 
         return sequence
